@@ -1,0 +1,26 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "env": {
+                "PYTHONPATH": "/workspace/QD-DETR/",
+                "name":"CUDA_VISIBLE_DEVICES", "value":"1"},
+            "cwd": "/workspace/QD-DETR",
+            "program": "/workspace/QD-DETR/qd_detr/inference.py",
+            "args": [
+                    "--resume", "results/hl-video_tef-exp-2024_01_05_17_22_17/model_best.ckpt",
+                    "--eval_split_name", "val",
+                    "--eval_path", "data/highlight_val_release.jsonl"
+                    
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true
+        }
+    ]
+}

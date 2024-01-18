@@ -1,0 +1,35 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "env": {
+                "PYTHONPATH": "/workspace/QD-DETR/",
+                "name":"CUDA_VISIBLE_DEVICES", "value":"1"},
+            "cwd": "/workspace/QD-DETR",
+            "program": "/workspace/QD-DETR/qd_detr/train.py",
+            "args": [
+                    "--dset_name", "hl",
+                    "--ctx_mode", "video_tef",
+                    "--train_path", "data/highlight_train_release.jsonl",
+                    "--eval_path", "data/highlight_val_release.jsonl",
+                    "--eval_split_name", "val",
+                    "--v_feat_dir", "../features/slowfast_features",
+                    "--v_feat_dim", "2304",
+                    "--t_feat_dir", "../features/clip_text_features/",
+                    "--t_feat_dim", "512",
+                    "--bsz", "32",
+                    "--results_root", "results",
+                    "--exp_id", "exp",
+                    "--seed", "2018",
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true
+        }
+    ]
+}
