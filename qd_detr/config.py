@@ -82,6 +82,9 @@ class BaseOptions(object):
         parser.add_argument("--t_feat_dim", type=int, help="text/query feature dim")
         parser.add_argument("--a_feat_dim", type=int, help="audio feature dim")
         parser.add_argument("--ctx_mode", type=str, default="video_tef")
+        parser.add_argument("--use_cliptext", type=str, default=None)
+        parser.add_argument("--text_ratio", type=float, default=0.5)
+
 
         # Model config
         parser.add_argument('--position_embedding', default='sine', type=str, choices=('sine', 'learned'),

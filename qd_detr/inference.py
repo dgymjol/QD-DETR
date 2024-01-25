@@ -367,6 +367,8 @@ def start_inference(train_opt=None, split=None, splitfile=None):
             max_q_l=opt.max_q_l,
             max_v_l=opt.max_v_l,
             ctx_mode=opt.ctx_mode,
+            use_cliptext=opt.use_cliptext,
+            text_ratio=opt.text_ratio,
             data_ratio=opt.data_ratio,
             normalize_v=not opt.no_norm_vfeat,
             normalize_t=not opt.no_norm_tfeat,
@@ -420,4 +422,5 @@ from sys import argv
 if __name__ == '__main__':
     _,_,_,_,split,_,splitfile = argv
 
+    torch.multiprocessing.set_start_method('spawn')
     start_inference(split=split, splitfile=splitfile)

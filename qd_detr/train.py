@@ -351,6 +351,8 @@ def start_training():
             max_q_l=opt.max_q_l,
             max_v_l=opt.max_v_l,
             ctx_mode=opt.ctx_mode,
+            use_cliptext=opt.use_cliptext,
+            text_ratio=opt.text_ratio,
             data_ratio=opt.data_ratio,
             normalize_v=not opt.no_norm_vfeat,
             normalize_t=not opt.no_norm_tfeat,
@@ -414,6 +416,7 @@ def start_training():
 
 
 if __name__ == '__main__':
+    torch.multiprocessing.set_start_method('spawn')
     best_ckpt_path, eval_split_name, eval_path, debug, opt = start_training()
     if not debug:
         input_args = ["--resume", best_ckpt_path,

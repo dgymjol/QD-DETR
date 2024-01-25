@@ -14,7 +14,7 @@
             "cwd": "/workspace/QD-DETR",
             "program": "/workspace/QD-DETR/qd_detr/inference.py",
             "args": [
-                    "--resume", "results/hl-video_tef-exp-2024_01_05_17_22_17/model_best.ckpt",
+                    "--resume", "results/hl-video_tef-exp-2024_01_22_08_50_15/model_best.ckpt",
                     "--eval_split_name", "val",
                     "--eval_path", "data/highlight_val_release.jsonl"
                     

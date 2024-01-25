@@ -16,6 +16,8 @@
             "args": [
                     "--dset_name", "hl",
                     "--ctx_mode", "video_tef",
+                    "--use_cliptext", "ViT-B/32 global_local_hidden_state",
+                    "--text_ratio", "0.3",
                     "--train_path", "data/highlight_train_release.jsonl",
                     "--eval_path", "data/highlight_val_release.jsonl",
                     "--eval_split_name", "val",

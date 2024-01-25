@@ -8,6 +8,10 @@ from os.path import join, exists
 from utils.basic_utils import load_jsonl, l2_normalize_np_array
 from utils.tensor_utils import pad_sequences_1d
 from qd_detr.span_utils import span_xx_to_cxw
+import CLIP
+import clip
+
+import spacy
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +31,7 @@ class StartEndDataset(Dataset):
 
     def __init__(self, dset_name, data_path, v_feat_dirs, q_feat_dir,
                  q_feat_type="last_hidden_state",
-                 max_q_l=32, max_v_l=75, data_ratio=1.0, ctx_mode="video",
+                 max_q_l=32, max_v_l=75, data_ratio=1.0, ctx_mode="video", use_cliptext=None, text_ratio=0.5,
                  normalize_v=True, normalize_t=True, load_labels=True,
                  clip_len=2, max_windows=5, span_loss_type="l1", txt_drop_ratio=0,
                  dset_domain=None):
@@ -42,6 +46,7 @@ class StartEndDataset(Dataset):
         self.max_v_l = max_v_l
         self.ctx_mode = ctx_mode
         self.use_tef = "tef" in ctx_mode
+        self.use_cliptext = use_cliptext
         self.use_video = "video" in ctx_mode
         self.normalize_t = normalize_t
         self.normalize_v = normalize_v
@@ -69,6 +74,18 @@ class StartEndDataset(Dataset):
                 if target_domain == d['domain']:
                     new_data.append(d)
             self.data = new_data
+
+        if self.use_cliptext:
+            print(f"++++++++++++++++++++++ CLIP {self.use_cliptext} +++++++++++++++++++++++++++++++++")
+
+            clip_type, self.text_type = self.use_cliptext.split(' ')
+
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+            self.clip_model, _ = CLIP.load(clip_type, device=self.device)
+
+            self.nlp = spacy.load('en_core_web_lg')
+
+            self.text_ratio = text_ratio
         
 
     def load_data(self):
@@ -87,7 +104,37 @@ class StartEndDataset(Dataset):
         meta = self.data[index]
 
         model_inputs = dict()
-        model_inputs["query_feat"] = self._get_query_feat_by_qid(meta["qid"])  # (Dq, ) or (Lq, Dq)
+        if self.use_cliptext is None:
+            model_inputs["query_feat"] = self._get_query_feat_by_qid(meta["qid"])  # (Dq, ) or (Lq, Dq)
+        else:
+            if self.text_type == 'org_hidden_state':
+                # sentence -> last hidden state
+                model_inputs["query_feat"] = self._get_clip_text_feat(meta["query"])  # (Dq, ) or (Lq, Dq)
+
+            elif self.text_type == 'global_local_features':
+                # sentence -> final feature (global)
+                # noun -> final feature (local)
+                # final = global + local
+                model_inputs["query_feat"] = self._get_global_local_features(meta["query"], self.text_ratio)
+
+            elif self.text_type == 'hidden_features':
+                # sentence -> last hidden state
+                # sen + noun -> final feature
+                # final = last hidden state + final feature
+                model_inputs["query_feat"] = self._get_hidden_features(meta["query"], self.text_ratio)
+
+            elif self.text_type == 'global_local_hidden_state':
+                # sentence -> last hidden state (global)
+                # noun -> last hidden state (local)
+                # final = local + global
+                model_inputs["query_feat"] = self._get_global_local_hidden_states(meta["query"], self.text_ratio)
+
+            elif self.text_type == 'only_local_hidden_state':
+                # noun -> last hidden state (local)
+                model_inputs["query_feat"] = self._get_only_noun_hidden_states(meta["query"])
+
+                
+
         if self.use_video:
             model_inputs["video_feat"] = self._get_video_feat_by_vid(meta["vid"])  # (Lv, Dv)
             ctx_l = len(model_inputs["video_feat"])
@@ -282,6 +329,273 @@ class StartEndDataset(Dataset):
             if self.txt_drop_ratio > 0:
                 q_feat = self.random_drop_rows(q_feat)
         return torch.from_numpy(q_feat)  # (D, ) or (Lq, D)
+
+    def _get_clip_text_feat(self, query):
+        if self.dset_name == 'tvsum':
+            q_feat = np.load(join(self.q_feat_dir, "{}.npz".format(qid))) # 'token', 'text'
+            return torch.from_numpy(q_feat['token'])
+        else:
+            # QVhighlight dataset
+            encoded_query = clip.tokenize([query]).to(self.device)
+            
+            with torch.no_grad():
+                q_feat = self.clip_model.encode_text_hidden_state(encoded_query)
+                
+                pad_start_idx = torch.nonzero(encoded_query[0]).flatten()[-1] + 1
+                q_feat = q_feat[0][:pad_start_idx]
+
+            if self.q_feat_type == "last_hidden_state":
+                q_feat = q_feat[:self.max_q_l]
+            if self.normalize_t:
+                # q_feat = l2_normalize_np_array(q_feat)
+                q_feat = q_feat / q_feat.norm(dim=-1, keepdim=True)
+            if self.txt_drop_ratio > 0:
+                q_feat = self.random_drop_rows(q_feat)
+
+        return q_feat  # (D, ) or (Lq, D)
+
+    def _get_global_local_features(self, query, r=0.5):
+        # sentence -> final feature (global)
+        # noun -> final feature (local)
+        # final = global + local
+        if self.dset_name == 'tvsum':
+            q_feat = np.load(join(self.q_feat_dir, "{}.npz".format(qid))) # 'token', 'text'
+            return torch.from_numpy(q_feat['token'])
+        else:
+            # QVhighlight dataset
+
+            query_ = query.lower()
+            doc = self.nlp(query_)
+
+            sentence_for_spacy = []
+
+            for i, token in enumerate(doc):
+                if token.text == ' ':
+                    continue
+                sentence_for_spacy.append(token.text)
+
+            sentence_for_spacy = ' '.join(sentence_for_spacy)
+            sentence_token = clip.tokenize(sentence_for_spacy).to(self.device)
+            noun_phrase, not_phrase_index, head_noun = self.extract_noun_phrase(sentence_for_spacy, need_index=True)
+            noun_phrase_token = clip.tokenize(noun_phrase).to(self.device)
+
+            with torch.no_grad():
+                sentence_features =self.clip_model.encode_text(sentence_token)
+                noun_phrase_features = self.clip_model.encode_text(noun_phrase_token)
+
+            q_feat = r * sentence_features + (1-r) * noun_phrase_features
+
+            if self.normalize_t:
+                q_feat = q_feat / q_feat.norm(dim=-1, keepdim=True)
+                
+            if self.txt_drop_ratio > 0:
+                q_feat = self.random_drop_rows(q_feat)
+
+        return q_feat  # (D, ) or (Lq, D)
+
+    def _get_hidden_features(self, query, r=0.5):
+        # sentence -> last hidden state
+        # sen + noun -> final feature
+        # final = last hidden state + final feature
+        if self.dset_name == 'tvsum':
+            q_feat = np.load(join(self.q_feat_dir, "{}.npz".format(qid))) # 'token', 'text'
+            return torch.from_numpy(q_feat['token'])
+        else:
+            # QVhighlight dataset
+  
+            query_ = query.lower()
+            doc = self.nlp(query_)
+
+            sentence_for_spacy = []
+
+            for i, token in enumerate(doc):
+                if token.text == ' ':
+                    continue
+                sentence_for_spacy.append(token.text)
+
+            sentence_for_spacy = ' '.join(sentence_for_spacy)
+            sentence_token = clip.tokenize(sentence_for_spacy).to(self.device)
+            noun_phrase, phrase_index, not_phase_index = self.extract_noun_phrase(sentence_for_spacy, need_index=True)
+            noun_phrase_token = clip.tokenize(noun_phrase).to(self.device)
+
+            
+            with torch.no_grad():
+                # 1) sentence last hidden state
+                sen_hidden_state = self.clip_model.encode_text_hidden_state(sentence_token)
+
+                pad_start_idx = torch.nonzero(sentence_token[0]).flatten()[-1] + 1
+                sen_hidden_state = sen_hidden_state[0][:pad_start_idx]
+
+                if self.q_feat_type == "last_hidden_state":
+                    sen_hidden_state = sen_hidden_state[:self.max_q_l]
+
+
+                # 2) sen + noun final features
+                sentence_features =self.clip_model.encode_text(sentence_token)
+                noun_phrase_features = self.clip_model.encode_text(noun_phrase_token)
+
+            # 2) sen + noun final features
+            text_ensemble = r * sentence_features + (1-r) * noun_phrase_features
+
+            # normalize
+            if self.normalize_t:
+                sen_hidden_state = sen_hidden_state / sen_hidden_state.norm(dim=-1, keepdim=True)     
+                final_feat = text_ensemble / text_ensemble.norm(dim=1, keepdim=True)
+
+            # 3) concat 1) and 2)
+            q_feat = torch.concat((sen_hidden_state, final_feat), dim=0)
+
+            if self.txt_drop_ratio > 0:
+                q_feat = self.random_drop_rows(q_feat)
+
+        return q_feat  # (D, ) or (Lq, D)
+    
+    def _get_global_local_hidden_states(self, query, r=0.5):
+        # sentence -> last hidden state (global)
+        # noun -> last hidden state (local)
+        # final = local + global
+        if self.dset_name == 'tvsum':
+            q_feat = np.load(join(self.q_feat_dir, "{}.npz".format(qid))) # 'token', 'text'
+            return torch.from_numpy(q_feat['token'])
+        else:
+            # QVhighlight dataset
+
+            query_ = query.lower()
+            doc = self.nlp(query_)
+
+            sentence_for_spacy = []
+
+            for i, token in enumerate(doc):
+                if token.text == ' ':
+                    continue
+                sentence_for_spacy.append(token.text)
+
+            sentence_for_spacy = ' '.join(sentence_for_spacy)
+            sentence_token = clip.tokenize(sentence_for_spacy).to(self.device)
+            noun_phrase, phrase_index, not_phrase_index = self.extract_noun_phrase(sentence_for_spacy, need_index=True)
+            noun_phrase_token = clip.tokenize(noun_phrase).to(self.device)
+            
+            with torch.no_grad():
+                # 1) sentence last hidden state
+                sen_hidden_state = self.clip_model.encode_text_hidden_state(sentence_token)
+        
+                # 2) noun last hidden state
+                noun_hidden_state = self.clip_model.encode_text_hidden_state(noun_phrase_token)
+                
+                only_noun_hidden_state = torch.zeros_like(sen_hidden_state)
+                for idx in phrase_index:
+                    only_noun_hidden_state[0][idx+1] = noun_hidden_state[0][idx+1]
+
+                pad_start_idx = torch.nonzero(sentence_token[0]).flatten()[-1] + 1
+
+                sen_hidden_state = sen_hidden_state[0][:pad_start_idx]
+                only_noun_hidden_state = only_noun_hidden_state[0][:pad_start_idx]
+
+                if self.q_feat_type == "last_hidden_state":
+                    sen_hidden_state = sen_hidden_state[:self.max_q_l]
+                    only_noun_hidden_state = only_noun_hidden_state[:self.max_q_l]
+
+            q_feat = r * sen_hidden_state + (1-r) * only_noun_hidden_state
+
+            if self.q_feat_type == "last_hidden_state":
+                q_feat = q_feat[:self.max_q_l]
+
+            if self.normalize_t:
+                q_feat = q_feat / q_feat.norm(dim=-1, keepdim=True)
+
+            if self.txt_drop_ratio > 0:
+                q_feat = self.random_drop_rows(q_feat)
+
+        return q_feat  # (D, ) or (Lq, D)
+
+    def _get_only_noun_hidden_states(self, query):
+        # sentence -> last hidden state (global)
+        # noun -> last hidden state (local)
+        # final = local + global
+        if self.dset_name == 'tvsum':
+            q_feat = np.load(join(self.q_feat_dir, "{}.npz".format(qid))) # 'token', 'text'
+            return torch.from_numpy(q_feat['token'])
+        else:
+            # QVhighlight dataset
+
+            query_ = query.lower()
+            doc = self.nlp(query_)
+
+            sentence_for_spacy = []
+
+            for i, token in enumerate(doc):
+                if token.text == ' ':
+                    continue
+                sentence_for_spacy.append(token.text)
+
+            sentence_for_spacy = ' '.join(sentence_for_spacy)
+            noun_phrase, phrase_index, not_phrase_index = self.extract_noun_phrase(sentence_for_spacy, need_index=True)
+            noun_phrase_token = clip.tokenize(noun_phrase).to(self.device)
+            
+            with torch.no_grad():
+
+                # noun last hidden state
+                noun_hidden_state = self.clip_model.encode_text_hidden_state(noun_phrase_token)
+
+                pad_start_idx = torch.nonzero(noun_phrase_token[0]).flatten()[-1] + 1
+
+                q_feat = noun_hidden_state[0][:pad_start_idx]
+
+            if self.q_feat_type == "last_hidden_state":
+                q_feat = q_feat[:self.max_q_l]
+
+            if self.normalize_t:
+                q_feat = q_feat / q_feat.norm(dim=-1, keepdim=True)
+
+            if self.txt_drop_ratio > 0:
+                q_feat = self.random_drop_rows(q_feat)
+
+        return q_feat  # (D, ) or (Lq, D)
+    
+    def extract_noun_phrase(self, text, need_index=False):
+        
+        text = text.lower()
+
+        doc = self.nlp(text)
+
+        chunks = {}
+        chunks_index = {}
+        for chunk in doc.noun_chunks:
+            for i in range(chunk.start, chunk.end):
+                chunks[i] = chunk
+                chunks_index[i] = (chunk.start, chunk.end)
+
+        for token in doc:
+            if token.head.i == token.i:
+                head = token.head
+
+        if head.i not in chunks:
+            children = list(head.children)
+            if children and children[0].i in chunks:
+                head = children[0]
+            else:
+                if need_index:
+                    return text, [], text
+                else:
+                    return text
+
+        head_index = chunks_index[head.i]
+        head_index = [i for i in range(head_index[0], head_index[1])]
+
+        sentence_index = [i for i in range(len(doc))]
+        phrase_index = []
+        not_phrase_index = []
+        for i in sentence_index:
+            if i in head_index:
+                phrase_index.append(i)
+            else:
+                not_phrase_index.append(i)
+
+        head = chunks[head.i]
+        if need_index:
+            return head.text, phrase_index, not_phrase_index
+        else:
+            return head.text
 
     def random_drop_rows(self, embeddings):
         """randomly mask num_drop rows in embeddings to be zero.
