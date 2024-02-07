@@ -35,7 +35,7 @@ else
 fi
 
 #### training
-bsz=32
+bsz=64
 
 
 CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
@@ -51,5 +51,6 @@ CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
 --bsz ${bsz} \
 --results_root ${results_root} \
 --exp_id ${exp_id} \
---m_classes '[10, 30, 150]'
+--m_classes '[10, 30, 150]' \
+--lr 1e-3
 ${@:1}

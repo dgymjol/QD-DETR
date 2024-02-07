@@ -90,6 +90,8 @@ class StartEndDataset(Dataset):
 
         if m_classes is not None:
             self.m_vals = [int(v) for v in m_classes[1:-1].split(',')]
+        else:
+            self.m_vals=None
         
 
     def load_data(self):
@@ -176,9 +178,9 @@ class StartEndDataset(Dataset):
                     if l <= m_val:
                         moment_class.append(m_cls)
                         break
-        model_inputs["moment_class"] = torch.tensor(moment_class)
-        
-        assert len(model_inputs["moment_class"]) == len(lengths)
+            model_inputs["moment_class"] = torch.tensor(moment_class)
+            
+            assert len(model_inputs["moment_class"]) == len(lengths)
                     
         return dict(meta=meta, model_inputs=model_inputs)
 
