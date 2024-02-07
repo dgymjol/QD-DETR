@@ -25,7 +25,8 @@ class QDDETR(nn.Module):
     def __init__(self, transformer, position_embed, txt_position_embed, txt_dim, vid_dim,
                  num_queries, input_dropout, aux_loss=False,
                  contrastive_align_loss=False, contrastive_hdim=64,
-                 max_v_l=75, span_loss_type="l1", use_txt_pos=False, n_input_proj=2, aud_dim=0):
+                 max_v_l=75, span_loss_type="l1", use_txt_pos=False, n_input_proj=2, aud_dim=0,
+                 m_classes=None):
         """ Initializes the model.
         Parameters:
             transformer: torch module of the transformer architecture. See transformer.py
@@ -86,6 +87,10 @@ class QDDETR(nn.Module):
         self.hidden_dim = hidden_dim
         self.global_rep_token = torch.nn.Parameter(torch.randn(hidden_dim))
         self.global_rep_pos = torch.nn.Parameter(torch.randn(hidden_dim))
+
+
+        if m_classes is not None:
+            self.m_vals = [int(v) for v in m_classes[1:-1].split(',')]
 
     def forward(self, src_txt, src_txt_mask, src_vid, src_vid_mask, src_aud=None, src_aud_mask=None):
         """The forward expects two tensors:
@@ -538,6 +543,7 @@ def build_model(args):
             span_loss_type=args.span_loss_type,
             use_txt_pos=args.use_txt_pos,
             n_input_proj=args.n_input_proj,
+            m_classes=args.m_classes,
         )
     else:
         model = QDDETR(
@@ -555,6 +561,7 @@ def build_model(args):
             span_loss_type=args.span_loss_type,
             use_txt_pos=args.use_txt_pos,
             n_input_proj=args.n_input_proj,
+            m_classes=args.m_classes,
         )
 
     matcher = build_matcher(args)

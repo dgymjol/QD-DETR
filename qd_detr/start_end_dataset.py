@@ -34,7 +34,8 @@ class StartEndDataset(Dataset):
                  max_q_l=32, max_v_l=75, data_ratio=1.0, ctx_mode="video", use_cliptext=None, text_ratio=0.5,
                  normalize_v=True, normalize_t=True, load_labels=True,
                  clip_len=2, max_windows=5, span_loss_type="l1", txt_drop_ratio=0,
-                 dset_domain=None):
+                 dset_domain=None,
+                 m_classes = None):
         self.dset_name = dset_name
         self.data_path = data_path
         self.data_ratio = data_ratio
@@ -86,6 +87,9 @@ class StartEndDataset(Dataset):
             self.nlp = spacy.load('en_core_web_lg')
 
             self.text_ratio = text_ratio
+
+        if m_classes is not None:
+            self.m_vals = [int(v) for v in m_classes[1:-1].split(',')]
         
 
     def load_data(self):
@@ -134,7 +138,6 @@ class StartEndDataset(Dataset):
                 model_inputs["query_feat"] = self._get_only_noun_hidden_states(meta["query"])
 
                 
-
         if self.use_video:
             model_inputs["video_feat"] = self._get_video_feat_by_vid(meta["vid"])  # (Lv, Dv)
             ctx_l = len(model_inputs["video_feat"])
@@ -158,13 +161,24 @@ class StartEndDataset(Dataset):
                 model_inputs["saliency_pos_labels"], model_inputs["saliency_neg_labels"], model_inputs["saliency_all_labels"] = \
                             self.get_saliency_labels_all_tvsum(meta_label, ctx_l)
             else:
-                model_inputs["span_labels"] = self.get_span_labels(meta["relevant_windows"], ctx_l)  # (#windows, 2)
+                model_inputs["span_labels"], lengths = self.get_span_labels(meta["relevant_windows"], ctx_l)  # (#windows, 2)
                 if "subs_train" not in self.data_path:
                     model_inputs["saliency_pos_labels"], model_inputs["saliency_neg_labels"], model_inputs["saliency_all_labels"] = \
                         self.get_saliency_labels_all(meta["relevant_clip_ids"], meta["saliency_scores"], ctx_l)
                 else:
                     model_inputs["saliency_pos_labels"], model_inputs["saliency_neg_labels"], model_inputs["saliency_all_labels"] = \
                         self.get_saliency_labels_sub_as_query(meta["relevant_windows"][0], ctx_l)  # only one gt
+
+        moment_class = []
+        if self.m_vals is not None:
+            for l in lengths:
+                for m_cls, m_val in enumerate(self.m_vals):
+                    if l <= m_val:
+                        moment_class.append(m_cls)
+                        break
+        model_inputs["moment_class"] = torch.tensor(moment_class).float()
+        
+        assert len(model_inputs["moment_class"]) == len(lengths)
                     
         return dict(meta=meta, model_inputs=model_inputs)
 
@@ -303,6 +317,11 @@ class StartEndDataset(Dataset):
         if len(windows) > self.max_windows:
             random.shuffle(windows)
             windows = windows[:self.max_windows]
+
+        lengths = []
+        for w in windows:
+            lengths.append(w[1]-w[0])
+
         if self.span_loss_type == "l1":
             windows = torch.Tensor(windows) / (ctx_l * self.clip_len)  # normalized windows in xx
             windows = span_xx_to_cxw(windows)  # normalized windows in cxw
@@ -312,7 +331,7 @@ class StartEndDataset(Dataset):
                 for w in windows]).long()  # inclusive
         else:
             raise NotImplementedError
-        return windows
+        return windows, lengths
 
     def _get_query_feat_by_qid(self, qid):
         if self.dset_name == 'tvsum':
@@ -662,6 +681,9 @@ def start_end_collate(batch):
             # print(pad_data, mask_data)
             batched_data[k] = torch.tensor(pad_data, dtype=torch.float32)
             continue
+        if k == "moment_class":
+            batched_data[k] = [dict(m_cls=e["model_inputs"]["moment_class"]) for e in batch]
+            continue
 
         batched_data[k] = pad_sequences_1d(
             [e["model_inputs"][k] for e in batch], dtype=torch.float32, fixed_length=None)
@@ -687,6 +709,12 @@ def prepare_batch_inputs(batched_model_inputs, device, non_blocking=False):
 
     if "saliency_all_labels" in batched_model_inputs:
         targets["saliency_all_labels"] = batched_model_inputs["saliency_all_labels"].to(device, non_blocking=non_blocking)
-
+    
+    if "moment_class" in batched_model_inputs:
+        targets["moment_class"] = [
+            dict(m_cls=e["m_cls"].to(device, non_blocking=non_blocking))
+            for e in batched_model_inputs["moment_class"]
+        ]
+    
     targets = None if len(targets) == 0 else targets
     return model_inputs, targets

@@ -84,6 +84,7 @@ class BaseOptions(object):
         parser.add_argument("--ctx_mode", type=str, default="video_tef")
         parser.add_argument("--use_cliptext", type=str, default=None)
         parser.add_argument("--text_ratio", type=float, default=0.5)
+        parser.add_argument('--m_classes', type=str, default=None)
 
 
         # Model config

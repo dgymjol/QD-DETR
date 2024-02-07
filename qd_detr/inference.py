@@ -378,6 +378,7 @@ def start_inference(train_opt=None, split=None, splitfile=None):
             span_loss_type=opt.span_loss_type,
             txt_drop_ratio=0,
             dset_domain=opt.dset_domain,
+            m_classes=opt.m_classes,
         )
     else:
         print("Video+Audio Evaluation")
@@ -400,6 +401,7 @@ def start_inference(train_opt=None, split=None, splitfile=None):
             span_loss_type=opt.span_loss_type,
             txt_drop_ratio=0,
             dset_domain=opt.dset_domain,
+            m_classes=opt.m_classes,
         )
 
 

@@ -121,6 +121,7 @@ class Transformer(nn.Module):
         pos_embed = pos_embed.permute(1, 0, 2)   # (L, batch_size, d)
         refpoint_embed = query_embed.unsqueeze(1).repeat(1, bs, 1)  # (#queries, batch_size, d)
 
+        # 2 Cross Attention Layer (each 1 CA layer has 8 multihead attention)
         src = self.t2v_encoder(src, src_key_padding_mask=mask, pos=pos_embed, video_length=video_length)  # (L, batch_size, d)
         # print('after encoder : ',src.shape)
         src = src[:video_length + 1]
