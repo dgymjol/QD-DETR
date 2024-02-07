@@ -56,7 +56,7 @@ class QDDETR(nn.Module):
         self.max_v_l = max_v_l
         span_pred_dim = 2 if span_loss_type == "l1" else max_v_l * 2
         self.span_embed = MLP(hidden_dim, hidden_dim, span_pred_dim, 3)
-        self.class_embed = nn.Linear(hidden_dim, 2)  # 0: background, 1: foreground
+        # self.class_embed = nn.Linear(hidden_dim, 2)  # 0: background, 1: foreground
         self.use_txt_pos = use_txt_pos
         self.n_input_proj = n_input_proj
         # self.foreground_thd = foreground_thd
@@ -89,8 +89,13 @@ class QDDETR(nn.Module):
         self.global_rep_pos = torch.nn.Parameter(torch.randn(hidden_dim))
 
 
-        if m_classes is not None:
+        if m_classes is None:
+            self.class_embed = nn.Linear(hidden_dim, 2)  # 0: background, 1: foreground
+        else:
             self.m_vals = [int(v) for v in m_classes[1:-1].split(',')]
+            self.class_embed = nn.Linear(hidden_dim, len(self.m_vals) +1 )  # [:-1] : foreground / [-1] : background
+
+
 
     def forward(self, src_txt, src_txt_mask, src_vid, src_vid_mask, src_aud=None, src_aud_mask=None):
         """The forward expects two tensors:
@@ -208,7 +213,7 @@ class SetCriterion(nn.Module):
     """
 
     def __init__(self, matcher, weight_dict, eos_coef, losses, temperature, span_loss_type, max_v_l,
-                 saliency_margin=1, use_matcher=True):
+                 saliency_margin=1, use_matcher=True, m_classes=None):
         """ Create the criterion.
         Parameters:
             matcher: module able to compute a matching between targets and proposals
@@ -224,21 +229,31 @@ class SetCriterion(nn.Module):
         self.matcher = matcher
         self.weight_dict = weight_dict
         self.losses = losses
+        self.eos_coef = eos_coef
+        
         self.temperature = temperature
         self.span_loss_type = span_loss_type
         self.max_v_l = max_v_l
         self.saliency_margin = saliency_margin
 
-        # foreground and background classification
-        self.foreground_label = 0
-        self.background_label = 1
-        self.eos_coef = eos_coef
-        empty_weight = torch.ones(2)
-        empty_weight[-1] = self.eos_coef  # lower weight for background (index 1, foreground index 0)
-        self.register_buffer('empty_weight', empty_weight)
-        
         # for tvsum,
         self.use_matcher = use_matcher
+
+        self.m_classes = m_classes
+        if m_classes is None:
+            # foreground and background classification
+            self.foreground_label = 0
+            self.background_label = 1
+
+            empty_weight = torch.ones(2)
+            empty_weight[-1] = self.eos_coef  # lower weight for background (index 1, foreground index 0)
+            self.register_buffer('empty_weight', empty_weight)
+        else:
+            self.num_classes = len(m_classes[1:-1].split(','))
+            empty_weight = torch.ones(self.num_classes+ 1)
+            empty_weight[-1] = self.eos_coef  # lower weight for background (index 1, foreground index 0)
+            self.register_buffer('empty_weight', empty_weight)      
+        
 
     def loss_spans(self, outputs, targets, indices):
         """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
@@ -281,16 +296,29 @@ class SetCriterion(nn.Module):
         src_logits = outputs['pred_logits']  # (batch_size, #queries, #classes=2)
         # idx is a tuple of two 1D tensors (batch_idx, src_idx), of the same length == #objects in batch
         idx = self._get_src_permutation_idx(indices)
-        target_classes = torch.full(src_logits.shape[:2], self.background_label,
-                                    dtype=torch.int64, device=src_logits.device)  # (batch_size, #queries)
-        target_classes[idx] = self.foreground_label
+
+        
+        if self.m_classes is None:
+            target_classes = torch.full(src_logits.shape[:2], self.background_label,
+                                        dtype=torch.int64, device=src_logits.device)  # (batch_size, #queries)
+            target_classes[idx] = self.foreground_label
+        else:
+            target_classes = torch.full(src_logits.shape[:2], self.num_classes,
+                                        dtype=torch.int64, device=src_logits.device)  # (batch_size, #queries)
+            
+            target_classes_o = torch.cat([t["m_cls"][J] for t, (_, J) in zip(targets['moment_class'], indices)])
+            target_classes[idx] = target_classes_o
+        
 
         loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight, reduction="none")
         losses = {'loss_label': loss_ce.mean()}
 
         if log:
             # TODO this should probably be a separate loss, not hacked in this one here
-            losses['class_error'] = 100 - accuracy(src_logits[idx], self.foreground_label)[0]
+            if self.m_classes is None:
+                losses['class_error'] = 100 - accuracy(src_logits[idx], self.foreground_label)[0]
+            else:
+                losses['class_error'] = 100 - accuracy(src_logits[idx], target_classes_o)[0]
         return losses
 
     def loss_saliency(self, outputs, targets, indices, log=True):
@@ -417,6 +445,7 @@ class SetCriterion(nn.Module):
         tgt_idx = torch.cat([tgt for (_, tgt) in indices])
         return batch_idx, tgt_idx
 
+    # TODO
     def get_loss(self, loss, outputs, targets, indices, **kwargs):
         loss_map = {
             "spans": self.loss_spans,
@@ -589,7 +618,8 @@ def build_model(args):
         matcher=matcher, weight_dict=weight_dict, losses=losses,
         eos_coef=args.eos_coef, temperature=args.temperature,
         span_loss_type=args.span_loss_type, max_v_l=args.max_v_l,
-        saliency_margin=args.saliency_margin, use_matcher=use_matcher,
+        saliency_margin=args.saliency_margin, use_matcher=use_matcher, 
+        m_classes=args.m_classes
     )
     criterion.to(device)
     return model, criterion

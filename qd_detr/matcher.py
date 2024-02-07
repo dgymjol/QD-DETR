@@ -55,12 +55,16 @@ class HungarianMatcher(nn.Module):
                 len(index_i) = len(index_j) = min(num_queries, num_target_spans)
         """
         bs, num_queries = outputs["pred_spans"].shape[:2]
-        targets = targets["span_labels"]
+        # targets = targets["span_labels"]
 
         # Also concat the target labels and spans
         out_prob = outputs["pred_logits"].flatten(0, 1).softmax(-1)  # [batch_size * num_queries, num_classes]
-        tgt_spans = torch.cat([v["spans"] for v in targets])  # [num_target_spans in batch, 2]
-        tgt_ids = torch.full([len(tgt_spans)], self.foreground_label)   # [total #spans in the batch]
+        tgt_spans = torch.cat([v["spans"] for v in targets["span_labels"]])  # [num_target_spans in batch, 2]
+
+        if 'moment_class' not in targets.keys():
+            tgt_ids = torch.full([len(tgt_spans)], self.foreground_label)   # [total #spans in the batch]
+        else:
+            tgt_ids = torch.cat([v["m_cls"] for v in targets['moment_class']])
 
         # Compute the classification cost. Contrary to the loss, we don't use the NLL,
         # but approximate it in 1 - prob[target class].
@@ -95,7 +99,7 @@ class HungarianMatcher(nn.Module):
         C = self.cost_span * cost_span + self.cost_giou * cost_giou + self.cost_class * cost_class
         C = C.view(bs, num_queries, -1).cpu()
 
-        sizes = [len(v["spans"]) for v in targets]
+        sizes = [len(v["spans"]) for v in targets["span_labels"]]
         indices = [linear_sum_assignment(c[i]) for i, c in enumerate(C.split(sizes, -1))]
         return [(torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64)) for i, j in indices]
 

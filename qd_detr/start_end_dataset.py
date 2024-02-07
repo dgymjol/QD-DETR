@@ -176,7 +176,7 @@ class StartEndDataset(Dataset):
                     if l <= m_val:
                         moment_class.append(m_cls)
                         break
-        model_inputs["moment_class"] = torch.tensor(moment_class).float()
+        model_inputs["moment_class"] = torch.tensor(moment_class)
         
         assert len(model_inputs["moment_class"]) == len(lengths)
                     

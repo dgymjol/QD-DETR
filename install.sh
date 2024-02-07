@@ -40,3 +40,4 @@ sudo apt-get install software-properties-common
 sudo add-apt-repository ppa:ubuntu-toolchain-r/test
 sudo apt-get install gcc-5
 sudo apt-get upgrade libstdc++6
+sudo apt-get install build-essential

@@ -38,7 +38,7 @@ fi
 bsz=32
 
 
-PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
+CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
 --dset_name ${dset_name} \
 --ctx_mode ${ctx_mode} \
 --train_path ${train_path} \
@@ -51,4 +51,5 @@ PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
 --bsz ${bsz} \
 --results_root ${results_root} \
 --exp_id ${exp_id} \
+--m_classes '[10, 30, 150]'
 ${@:1}
