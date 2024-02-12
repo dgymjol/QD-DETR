@@ -17,7 +17,7 @@ class HungarianMatcher(nn.Module):
     while the others are un-matched (and thus treated as non-objects).
     """
     def __init__(self,  cost_class: float = 1, cost_span: float = 1, cost_giou: float = 1,
-                 span_loss_type: str = "l1", max_v_l: int = 75):
+                 span_loss_type: str = "l1", label_loss_type: str = "ce", focal_alpha: float = 0.25, max_v_l: int = 75):
         """Creates the matcher
 
         Params:
@@ -29,6 +29,8 @@ class HungarianMatcher(nn.Module):
         self.cost_span = cost_span
         self.cost_giou = cost_giou
         self.span_loss_type = span_loss_type
+        self.label_loss_type = label_loss_type
+        self.focal_alpha = focal_alpha
         self.max_v_l = max_v_l
         self.foreground_label = 0
         assert cost_class != 0 or cost_span != 0 or cost_giou != 0, "all costs cant be 0"
@@ -69,7 +71,14 @@ class HungarianMatcher(nn.Module):
         # Compute the classification cost. Contrary to the loss, we don't use the NLL,
         # but approximate it in 1 - prob[target class].
         # The 1 is a constant that doesn't change the matching, it can be omitted.
-        cost_class = -out_prob[:, tgt_ids]  # [batch_size * num_queries, total #spans in the batch]
+        if self.label_loss_type == "ce":
+            cost_class = -out_prob[:, tgt_ids]  # [batch_size * num_queries, total #spans in the batch]
+        else:
+            alpha = self.focal_alpha
+            gamma = 2.0
+            neg_cost_class = (1 - alpha) * (out_prob ** gamma) * (-(1 - out_prob + 1e-8).log())
+            pos_cost_class = alpha * ((1 - out_prob) ** gamma) * (-(out_prob + 1e-8).log())
+            cost_class = pos_cost_class[:, tgt_ids] - neg_cost_class[:, tgt_ids]
 
         if self.span_loss_type == "l1":
             # We flatten to compute the cost matrices in a batch
@@ -107,5 +116,6 @@ class HungarianMatcher(nn.Module):
 def build_matcher(args):
     return HungarianMatcher(
         cost_span=args.set_cost_span, cost_giou=args.set_cost_giou,
-        cost_class=args.set_cost_class, span_loss_type=args.span_loss_type, max_v_l=args.max_v_l
+        cost_class=args.set_cost_class, span_loss_type=args.span_loss_type, 
+        label_loss_type=args.label_loss_type, focal_alpha=args.focal_alpha, max_v_l=args.max_v_l
     )

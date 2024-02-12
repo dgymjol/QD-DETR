@@ -35,26 +35,7 @@ else
 fi
 
 #### training
-bsz=32
-CUDA_VISIBLE_DEVICES=3 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
---dset_name ${dset_name} \
---ctx_mode ${ctx_mode} \
---train_path ${train_path} \
---eval_path ${eval_path} \
---eval_split_name ${eval_split_name} \
---v_feat_dirs ${v_feat_dirs[@]} \
---v_feat_dim ${v_feat_dim} \
---t_feat_dir ${t_feat_dir} \
---t_feat_dim ${t_feat_dim} \
---bsz ${bsz} \
---results_root ${results_root} \
---exp_id ${exp_id} \
---m_classes '[5, 10, 30, 70, 150]' \
-${@:1}
-
-
-bsz=128
-list="5e-4 1e-3 5e-3 1e-2"
+list="0.2 0.4 0.6 0.8"
 
 for var in $list
 do
@@ -70,14 +51,29 @@ do
   --v_feat_dim ${v_feat_dim} \
   --t_feat_dir ${t_feat_dir} \
   --t_feat_dim ${t_feat_dim} \
-  --bsz ${bsz} \
   --results_root ${results_root} \
   --exp_id ${exp_id} \
-  --m_classes '[5, 10, 30, 70, 150]' \
-  --lr ${var}
+  --m_classes "[10, 30, 150]" \
+  --label_loss_type 'focal' \
+  --focal_alpha ${var}
+
+  CUDA_VISIBLE_DEVICES=3 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
+  --dset_name ${dset_name} \
+  --ctx_mode ${ctx_mode} \
+  --train_path ${train_path} \
+  --eval_path ${eval_path} \
+  --eval_split_name ${eval_split_name} \
+  --v_feat_dirs ${v_feat_dirs[@]} \
+  --v_feat_dim ${v_feat_dim} \
+  --t_feat_dir ${t_feat_dir} \
+  --t_feat_dim ${t_feat_dim} \
+  --results_root ${results_root} \
+  --exp_id ${exp_id} \
+  --m_classes "[5, 10, 30, 70, 150]" \
+  --label_loss_type 'focal' \
+  --focal_alpha ${var}
 
   ${@:1}
-${@:3}
+  ${@:3}
 done
-
 

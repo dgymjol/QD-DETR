@@ -35,29 +35,33 @@ else
 fi
 
 #### training
-bsz=32
-CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
---dset_name ${dset_name} \
---ctx_mode ${ctx_mode} \
---train_path ${train_path} \
---eval_path ${eval_path} \
---eval_split_name ${eval_split_name} \
---v_feat_dirs ${v_feat_dirs[@]} \
---v_feat_dim ${v_feat_dim} \
---t_feat_dir ${t_feat_dir} \
---t_feat_dim ${t_feat_dim} \
---bsz ${bsz} \
---results_root ${results_root} \
---exp_id ${exp_id} \
-${@:1}
 
+# bsz=32
+# list="[5, 10, 30, 50, 80, 150]"
 
-bsz=128
-list="5e-4 1e-3 5e-3 1e-2"
+# for var in $list
+# do
+#   echo $var
 
-for var in $list
-do
-  echo $var
+#   CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
+#   --dset_name ${dset_name} \
+#   --ctx_mode ${ctx_mode} \
+#   --train_path ${train_path} \
+#   --eval_path ${eval_path} \
+#   --eval_split_name ${eval_split_name} \
+#   --v_feat_dirs ${v_feat_dirs[@]} \
+#   --v_feat_dim ${v_feat_dim} \
+#   --t_feat_dir ${t_feat_dir} \
+#   --t_feat_dim ${t_feat_dim} \
+#   --results_root ${results_root} \
+#   --exp_id ${exp_id} \
+#   --m_classes "[5, 10, 30, 50, 80, 150]" \
+#   --num_queries 100 \
+#   --max_windows 10
+
+#   ${@:1}
+# ${@:3}
+# done
 
   CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
   --dset_name ${dset_name} \
@@ -69,13 +73,82 @@ do
   --v_feat_dim ${v_feat_dim} \
   --t_feat_dir ${t_feat_dir} \
   --t_feat_dim ${t_feat_dim} \
-  --bsz ${bsz} \
   --results_root ${results_root} \
   --exp_id ${exp_id} \
-  --lr ${var}
+  --m_classes "[10, 30, 50, 70, 90, 110, 130, 150]"
 
-  ${@:1}
-${@:3}
-done
+  CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
+  --dset_name ${dset_name} \
+  --ctx_mode ${ctx_mode} \
+  --train_path ${train_path} \
+  --eval_path ${eval_path} \
+  --eval_split_name ${eval_split_name} \
+  --v_feat_dirs ${v_feat_dirs[@]} \
+  --v_feat_dim ${v_feat_dim} \
+  --t_feat_dir ${t_feat_dir} \
+  --t_feat_dim ${t_feat_dim} \
+  --results_root ${results_root} \
+  --exp_id ${exp_id} \
+  --m_classes "[30, 60, 90, 120, 150]"
 
+  CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
+  --dset_name ${dset_name} \
+  --ctx_mode ${ctx_mode} \
+  --train_path ${train_path} \
+  --eval_path ${eval_path} \
+  --eval_split_name ${eval_split_name} \
+  --v_feat_dirs ${v_feat_dirs[@]} \
+  --v_feat_dim ${v_feat_dim} \
+  --t_feat_dir ${t_feat_dir} \
+  --t_feat_dim ${t_feat_dim} \
+  --results_root ${results_root} \
+  --exp_id ${exp_id} \
+  --m_classes "[50, 100, 150]"
+  
+  CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
+  --dset_name ${dset_name} \
+  --ctx_mode ${ctx_mode} \
+  --train_path ${train_path} \
+  --eval_path ${eval_path} \
+  --eval_split_name ${eval_split_name} \
+  --v_feat_dirs ${v_feat_dirs[@]} \
+  --v_feat_dim ${v_feat_dim} \
+  --t_feat_dir ${t_feat_dir} \
+  --t_feat_dim ${t_feat_dim} \
+  --results_root ${results_root} \
+  --exp_id ${exp_id} \
+  --m_classes "[10, 30, 50, 70, 90, 110, 130, 150]" \
+  --bsz 128 \
+  --lr "5e-4"
 
+  CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
+  --dset_name ${dset_name} \
+  --ctx_mode ${ctx_mode} \
+  --train_path ${train_path} \
+  --eval_path ${eval_path} \
+  --eval_split_name ${eval_split_name} \
+  --v_feat_dirs ${v_feat_dirs[@]} \
+  --v_feat_dim ${v_feat_dim} \
+  --t_feat_dir ${t_feat_dir} \
+  --t_feat_dim ${t_feat_dim} \
+  --results_root ${results_root} \
+  --exp_id ${exp_id} \
+  --m_classes "[30, 60, 90, 120, 150]" \
+  --bsz 128 \
+  --lr "5e-4"
+
+  CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
+  --dset_name ${dset_name} \
+  --ctx_mode ${ctx_mode} \
+  --train_path ${train_path} \
+  --eval_path ${eval_path} \
+  --eval_split_name ${eval_split_name} \
+  --v_feat_dirs ${v_feat_dirs[@]} \
+  --v_feat_dim ${v_feat_dim} \
+  --t_feat_dir ${t_feat_dir} \
+  --t_feat_dim ${t_feat_dim} \
+  --results_root ${results_root} \
+  --exp_id ${exp_id} \
+  --m_classes "[50, 100, 150]" \
+  --bsz 128 \
+  --lr "5e-4"

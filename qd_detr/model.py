@@ -19,6 +19,34 @@ def inverse_sigmoid(x, eps=1e-3):
     x2 = (1 - x).clamp(min=eps)
     return torch.log(x1/x2)
 
+def sigmoid_focal_loss(inputs, targets, num_boxes, alpha: float = 0.25, gamma: float = 2):
+    """
+    Loss used in RetinaNet for dense detection: https://arxiv.org/abs/1708.02002.
+    Args:
+        inputs: A float tensor of arbitrary shape.
+                The predictions for each example.
+        targets: A float tensor with the same shape as inputs. Stores the binary
+                 classification label for each element in inputs
+                (0 for the negative class and 1 for the positive class).
+        alpha: (optional) Weighting factor in range (0,1) to balance
+                positive vs negative examples. Default = -1 (no weighting).
+        gamma: Exponent of the modulating factor (1 - p_t) to
+               balance easy vs hard examples.
+    Returns:
+        Loss tensor
+    """
+    prob = inputs.sigmoid()
+    ce_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduction="none")
+    p_t = prob * targets + (1 - prob) * (1 - targets)
+    loss = ce_loss * ((1 - p_t) ** gamma)
+
+    if alpha >= 0:
+        alpha_t = alpha * targets + (1 - alpha) * (1 - targets)
+        loss = alpha_t * loss
+
+
+    return loss.mean(1).sum() / num_boxes
+
 class QDDETR(nn.Module):
     """ QD DETR. """
 
@@ -212,8 +240,8 @@ class SetCriterion(nn.Module):
         2) we supervise each pair of matched ground-truth / prediction (supervise class and box)
     """
 
-    def __init__(self, matcher, weight_dict, eos_coef, losses, temperature, span_loss_type, max_v_l,
-                 saliency_margin=1, use_matcher=True, m_classes=None):
+    def __init__(self, matcher, weight_dict, eos_coef, losses, temperature, span_loss_type, label_loss_type, max_v_l,
+                 saliency_margin=1, use_matcher=True, m_classes=None, focal_alpha=0.25):
         """ Create the criterion.
         Parameters:
             matcher: module able to compute a matching between targets and proposals
@@ -233,6 +261,8 @@ class SetCriterion(nn.Module):
         
         self.temperature = temperature
         self.span_loss_type = span_loss_type
+        self.label_loss_type = label_loss_type
+        self.focal_alpha = focal_alpha
         self.max_v_l = max_v_l
         self.saliency_margin = saliency_margin
 
@@ -255,7 +285,7 @@ class SetCriterion(nn.Module):
             self.register_buffer('empty_weight', empty_weight)      
         
 
-    def loss_spans(self, outputs, targets, indices):
+    def loss_spans(self, outputs, targets, indices, num_preds):
         """Compute the losses related to the bounding boxes, the L1 regression loss and the GIoU loss
            targets dicts must contain the key "spans" containing a tensor of dim [nb_tgt_spans, 2]
            The target spans are expected in format (center_x, w), normalized by the image size.
@@ -287,7 +317,7 @@ class SetCriterion(nn.Module):
         losses['loss_giou'] = loss_giou.mean()
         return losses
 
-    def loss_labels(self, outputs, targets, indices, log=True):
+    def loss_labels(self, outputs, targets, indices, num_preds, log=True):
         """Classification loss (NLL)
         targets dicts must contain the key "labels" containing a tensor of dim [nb_target_boxes]
         """
@@ -309,8 +339,17 @@ class SetCriterion(nn.Module):
             target_classes_o = torch.cat([t["m_cls"][J] for t, (_, J) in zip(targets['moment_class'], indices)])
             target_classes[idx] = target_classes_o
         
+        if self.label_loss_type == 'ce':
+            loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight, reduction="none")
+        else:
+            target_classes_onehot = torch.zeros([src_logits.shape[0], src_logits.shape[1], src_logits.shape[2]+1],
+                                                dtype=src_logits.dtype, layout=src_logits.layout, device=src_logits.device)
+            target_classes_onehot.scatter_(2, target_classes.unsqueeze(-1), 1)
 
-        loss_ce = F.cross_entropy(src_logits.transpose(1, 2), target_classes, self.empty_weight, reduction="none")
+            target_classes_onehot = target_classes_onehot[:,:,:-1]
+            loss_ce = sigmoid_focal_loss(src_logits, target_classes_onehot, num_preds, alpha=self.focal_alpha, gamma=2) * src_logits.shape[1]
+            
+        losses = {'loss_ce': loss_ce}
         losses = {'loss_label': loss_ce.mean()}
 
         if log:
@@ -321,7 +360,7 @@ class SetCriterion(nn.Module):
                 losses['class_error'] = 100 - accuracy(src_logits[idx], target_classes_o)[0]
         return losses
 
-    def loss_saliency(self, outputs, targets, indices, log=True):
+    def loss_saliency(self, outputs, targets, indices, num_preds, log=True):
         """higher scores for positive clips"""
         if "saliency_pos_labels" not in targets:
             return {"loss_saliency": 0}
@@ -393,7 +432,7 @@ class SetCriterion(nn.Module):
         # loss_saliency = loss_rank_contrastive
         return {"loss_saliency": loss_saliency}
 
-    def loss_contrastive_align(self, outputs, targets, indices, log=True):
+    def loss_contrastive_align(self, outputs, targets, indices, num_preds, log=True):
         """encourage higher scores between matched query span and input text"""
         normalized_text_embed = outputs["proj_txt_mem"]  # (bsz, #tokens, d)  text tokens
         normalized_img_embed = outputs["proj_queries"]  # (bsz, #queries, d)
@@ -412,7 +451,7 @@ class SetCriterion(nn.Module):
         losses = {"loss_contrastive_align": loss_nce.mean()}
         return losses
 
-    def loss_contrastive_align_vid_txt(self, outputs, targets, indices, log=True):
+    def loss_contrastive_align_vid_txt(self, outputs, targets, indices, num_preds, log=True):
         """encourage higher scores between matched query span and input text"""
         # TODO (1)  align vid_mem and txt_mem;
         # TODO (2) change L1 loss as CE loss on 75 labels, similar to soft token prediction in MDETR
@@ -446,7 +485,7 @@ class SetCriterion(nn.Module):
         return batch_idx, tgt_idx
 
     # TODO
-    def get_loss(self, loss, outputs, targets, indices, **kwargs):
+    def get_loss(self, loss, outputs, targets, indices, num_preds, **kwargs):
         loss_map = {
             "spans": self.loss_spans,
             "labels": self.loss_labels,
@@ -454,7 +493,7 @@ class SetCriterion(nn.Module):
             "saliency": self.loss_saliency,
         }
         assert loss in loss_map, f'do you really want to compute {loss} loss?'
-        return loss_map[loss](outputs, targets, indices, **kwargs)
+        return loss_map[loss](outputs, targets, indices, num_preds, **kwargs)
 
     def forward(self, outputs, targets):
         """ This performs the loss computation.
@@ -476,11 +515,16 @@ class SetCriterion(nn.Module):
             indices = None
             losses_target = ["saliency"]
 
+        # Compute the average number of target boxes accross all nodes, for normalization purposes
+        num_preds = sum(len(t["spans"]) for t in targets["span_labels"])
+        num_preds = torch.as_tensor([num_preds], dtype=torch.float, device=next(iter(outputs.values())).device)
+
+
         # Compute all the requested losses
         losses = {}
         # for loss in self.losses:
         for loss in losses_target:
-            losses.update(self.get_loss(loss, outputs, targets, indices))
+            losses.update(self.get_loss(loss, outputs, targets, indices, num_preds))
 
         # In case of auxiliary losses, we repeat this process with the output of each intermediate layer.
         if 'aux_outputs' in outputs:
@@ -497,7 +541,7 @@ class SetCriterion(nn.Module):
                     if "saliency" == loss:  # skip as it is only in the top layer
                         continue
                     kwargs = {}
-                    l_dict = self.get_loss(loss, aux_outputs, targets, indices, **kwargs)
+                    l_dict = self.get_loss(loss, aux_outputs, targets, indices, num_preds, **kwargs)
                     l_dict = {k + f'_{i}': v for k, v in l_dict.items()}
                     losses.update(l_dict)
         return losses
@@ -617,9 +661,9 @@ def build_model(args):
     criterion = SetCriterion(
         matcher=matcher, weight_dict=weight_dict, losses=losses,
         eos_coef=args.eos_coef, temperature=args.temperature,
-        span_loss_type=args.span_loss_type, max_v_l=args.max_v_l,
+        span_loss_type=args.span_loss_type, label_loss_type=args.label_loss_type, max_v_l=args.max_v_l,
         saliency_margin=args.saliency_margin, use_matcher=use_matcher, 
-        m_classes=args.m_classes
+        m_classes=args.m_classes, focal_alpha=args.focal_alpha
     )
     criterion.to(device)
     return model, criterion

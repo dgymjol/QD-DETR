@@ -35,9 +35,7 @@ else
 fi
 
 #### training
-bsz=64
-
-
+bsz=32
 CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
 --dset_name ${dset_name} \
 --ctx_mode ${ctx_mode} \
@@ -51,6 +49,6 @@ CUDA_VISIBLE_DEVICES=0 PYTHONPATH=$PYTHONPATH:. python qd_detr/train.py \
 --bsz ${bsz} \
 --results_root ${results_root} \
 --exp_id ${exp_id} \
---m_classes '[10, 30, 150]' \
---lr 1e-3
+--label_loss_type 'focal' \
+--focal_alpha 0.3
 ${@:1}
